@@ -1,6 +1,7 @@
 use crate::{config::Settings, document::*};
 use pest::{error::Error, iterators::Pair, Parser};
 use std::collections::HashSet;
+use std::path::Path;
 
 #[derive(Parser)]
 #[grammar = "ast/unreal_cpp_header.pest"]
@@ -11,12 +12,14 @@ pub fn parse_unreal_cpp_header(
     content: &str,
     document: &mut Document,
     settings: &Settings,
+    path: &Path
 ) -> Result<(), Error<Rule>> {
     let pair = UnrealCppHeaderParser::parse(Rule::file, content)?
         .next()
         .unwrap();
     if pair.as_rule() == Rule::file {
-        parse_file(pair, document, settings);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        parse_file(pair, document, settings, filename);
     }
     Ok(())
 }
@@ -25,6 +28,7 @@ fn parse_unreal_cpp_element(
     content: &str,
     document: &mut Document,
     settings: &Settings,
+    filename: &str
 ) -> Element {
     let pair = UnrealCppHeaderParser::parse(Rule::element, content)
         .unwrap_or_else(|error| {
@@ -36,17 +40,17 @@ fn parse_unreal_cpp_element(
         .next()
         .unwrap();
     match pair.as_rule() {
-        Rule::element => parse_element(pair, Visibility::Public, settings, document),
+        Rule::element => parse_element(pair, Visibility::Public, settings, document, filename),
         _ => unreachable!(),
     }
 }
 
-fn parse_file(pair: Pair<Rule>, document: &mut Document, settings: &Settings) {
+fn parse_file(pair: Pair<Rule>, document: &mut Document, settings: &Settings, filename: &str) {
     for pair in pair.into_inner() {
         match pair.as_rule() {
-            Rule::proxy => parse_proxy(pair, settings, document),
+            Rule::proxy => parse_proxy(pair, settings, document, filename),
             Rule::snippet => parse_snippet(pair, document),
-            Rule::element => match parse_element(pair, Visibility::Public, settings, document) {
+            Rule::element => match parse_element(pair, Visibility::Public, settings, document, filename) {
                 Element::Enum(element) => {
                     if element.can_export(settings) {
                         if document.enums.iter().any(|item| item.name == element.name) {
@@ -81,6 +85,18 @@ fn parse_file(pair: Pair<Rule>, document: &mut Document, settings: &Settings) {
                         }
                     }
                 },
+                Element::Delegate(element) => {
+                    if element.can_export(settings) {
+                        if document
+                            .delegates
+                            .iter()
+                            .any(|item| item.name == element.name)
+                        {
+                            println!("Overwriting existing delegate: {}", element.name);
+                        }
+                        document.delegates.push(element);
+                    }
+                },
                 Element::Function(element) => {
                     if element.can_export(settings) {
                         if document
@@ -92,7 +108,7 @@ fn parse_file(pair: Pair<Rule>, document: &mut Document, settings: &Settings) {
                         }
                         document.functions.push(element)
                     }
-                }
+                },
                 _ => {}
             },
             _ => {}
@@ -100,7 +116,7 @@ fn parse_file(pair: Pair<Rule>, document: &mut Document, settings: &Settings) {
     }
 }
 
-fn parse_proxy(pair: Pair<Rule>, settings: &Settings, document: &mut Document) {
+fn parse_proxy(pair: Pair<Rule>, settings: &Settings, document: &mut Document, filename: &str) {
     let mut doc_comments = None;
     let mut tags = HashSet::new();
     let mut content = String::new();
@@ -116,7 +132,7 @@ fn parse_proxy(pair: Pair<Rule>, settings: &Settings, document: &mut Document) {
             _ => {}
         }
     }
-    match parse_unreal_cpp_element(&content, document, settings) {
+    match parse_unreal_cpp_element(&content, document, settings, filename) {
         Element::Function(mut item) => {
             if let Some(doc_comments) = doc_comments {
                 item.doc_comments = Some(doc_comments);
@@ -183,6 +199,7 @@ enum Element {
     StructClass(StructClass),
     Property(Property),
     Function(Function),
+    Delegate(Delegate),
 }
 
 fn parse_element(
@@ -190,13 +207,14 @@ fn parse_element(
     visibility: Visibility,
     settings: &Settings,
     document: &mut Document,
+    filename: &str
 ) -> Element {
     let mut result = Element::None;
     let mut doc_comments = None;
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::doc_comment_lines => doc_comments = Some(parse_doc_comments(pair)),
-            Rule::element_enum => result = Element::Enum(parse_element_enum(pair, &doc_comments)),
+            Rule::element_enum => result = Element::Enum(parse_element_enum(pair, &doc_comments, filename)),
             Rule::element_struct => {
                 result = Element::StructClass(parse_element_struct_class(
                     pair,
@@ -204,6 +222,7 @@ fn parse_element(
                     StructClassMode::Struct,
                     settings,
                     document,
+                    filename
                 ));
             }
             Rule::element_class => {
@@ -213,6 +232,7 @@ fn parse_element(
                     StructClassMode::Class,
                     settings,
                     document,
+                    filename
                 ));
             }
             Rule::element_property => {
@@ -224,6 +244,39 @@ fn parse_element(
                     &doc_comments,
                     visibility,
                     document,
+                    filename
+                ));
+            }
+            Rule::element_delegate => {
+                result = Element::Delegate(parse_element_delegate(
+                    pair,
+                    &doc_comments,
+                    document,
+                    filename
+                ));
+            }
+            Rule::element_multicast_delegate => {
+                result = Element::Delegate(parse_element_delegate(
+                    pair,
+                    &doc_comments,
+                    document,
+                    filename
+                ));
+            }
+            Rule::element_dynamic_delegate => {
+                result = Element::Delegate(parse_element_delegate(
+                    pair,
+                    &doc_comments,
+                    document,
+                    filename
+                ));
+            }
+            Rule::element_dyn_multicast_delegate => {
+                result = Element::Delegate(parse_element_delegate(
+                    pair,
+                    &doc_comments,
+                    document,
+                    filename
                 ));
             }
             _ => {}
@@ -273,11 +326,14 @@ fn parse_specifier_meta(pair: Pair<Rule>, result: &mut Specifiers) {
     }
 }
 
-fn parse_element_enum(pair: Pair<Rule>, doc_comments: &Option<String>) -> Enum {
+fn parse_element_enum(pair: Pair<Rule>, doc_comments: &Option<String>, filename: &str) -> Enum {
     let mut result = Enum {
         doc_comments: doc_comments.to_owned(),
         ..Default::default()
     };
+    result.fileline = pair.line_col().0;
+    result.filename = filename.to_string();
+
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::uenum => result.specifiers = Some(parse_specifiers(pair)),
@@ -305,12 +361,15 @@ fn parse_element_struct_class(
     mode: StructClassMode,
     settings: &Settings,
     document: &mut Document,
+    filename: &str
 ) -> StructClass {
     let mut result = StructClass {
         mode,
         doc_comments: doc_comments.to_owned(),
         ..Default::default()
     };
+    result.filename = filename.to_string();
+    result.fileline = pair.line_col().0;
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::ustruct | Rule::uclass => result.specifiers = Some(parse_specifiers(pair)),
@@ -324,6 +383,7 @@ fn parse_element_struct_class(
                     mode.default_visibility(),
                     settings,
                     document,
+                    filename
                 );
             }
             _ => {}
@@ -350,6 +410,7 @@ fn parse_struct_class_body(
     mut visibility: Visibility,
     settings: &Settings,
     document: &mut Document,
+    filename: &str
 ) {
     for pair in pair.into_inner() {
         match pair.as_rule() {
@@ -363,7 +424,7 @@ fn parse_struct_class_body(
                     result.injects.insert(parse_identifier(pair));
                 }
             }
-            Rule::element => match parse_element(pair, visibility, settings, document) {
+            Rule::element => match parse_element(pair, visibility, settings, document, filename) {
                 Element::Property(element) => {
                     if element.can_export(settings) {
                         result.properties.push(element);
@@ -422,17 +483,99 @@ fn parse_property_array(pair: Pair<Rule>) -> PropertyArray {
     }
 }
 
+fn parse_element_delegate(
+    pair: Pair<Rule>,
+    doc_comments: &Option<String>,
+    _document: &mut Document,
+    filename: &str
+) -> Delegate {
+    let mut result = Delegate {
+        doc_comments: doc_comments.to_owned(),
+        ..Default::default()
+    };
+    result.filename = filename.to_string();
+    result.fileline = pair.line_col().0;
+
+    if pair.as_rule() == Rule::element_multicast_delegate || pair.as_rule() == Rule::element_dyn_multicast_delegate {
+        result.multicast = true;
+    }
+    if pair.as_rule() == Rule::element_dynamic_delegate || pair.as_rule() == Rule::element_dyn_multicast_delegate {
+        result.dynamic = true;
+    }
+
+    for pair in pair.into_inner() {
+        match pair.as_rule() {
+            Rule::udelegate => result.specifiers = Some(parse_specifiers(pair)),
+            Rule::delegate_name => result.name = pair.as_str().to_owned(),
+            Rule::delegate_arguments => parse_delegate_args(pair, &mut result),
+            Rule::dynamic_delegate_arguments => parse_delegate_args(pair, &mut result),
+            _ => {}
+        }
+    }
+
+    result
+}
+
+fn parse_delegate_args(pair: Pair<Rule>, delegate: &mut Delegate) {
+    for pair in pair.into_inner() {
+        match pair.as_rule() {
+            Rule::delegate_argument => {
+                    delegate.arguments.push(parse_delegate_arg(pair, delegate.dynamic));
+            },
+            Rule::dynamic_delegate_argument => {
+                delegate.arguments.push(parse_delegate_arg(pair, delegate.dynamic));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_delegate_arg(pair: Pair<Rule>, is_dynamic: bool) -> Argument {
+    let mut arg = Argument::default();
+    for pair in pair.into_inner() {
+        if is_dynamic {
+            match pair.as_rule() {
+                Rule::identifier => {
+                    arg.name = Some(parse_identifier(pair));
+                }
+                Rule::value_type => {
+                    arg.value_type = parse_value_type(pair);
+                }
+                _ => {}
+            }
+        }
+        else {
+            match pair.as_rule() {
+                Rule::delegate_argument_name =>
+                {
+                    arg.name = Some(parse_identifier(pair));
+                }
+                Rule::value_type =>
+                {
+                    arg.value_type = parse_value_type(pair);
+                }
+                _ => {}
+            }
+        }
+    }
+    arg
+}
+
 fn parse_element_function(
     pair: Pair<Rule>,
     doc_comments: &Option<String>,
     visibility: Visibility,
     document: &mut Document,
+    filename: &str
 ) -> Function {
     let mut result = Function {
         doc_comments: doc_comments.to_owned(),
         visibility,
         ..Default::default()
     };
+    result.filename = filename.to_string();
+    result.fileline = pair.line_col().0;
+
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::ufunction => result.specifiers = Some(parse_specifiers(pair)),
@@ -533,6 +676,6 @@ fn parse_identifier(pair: Pair<Rule>) -> String {
 fn test_parsing() {
     let content = crate::read_file("resources/source/test.h").unwrap();
     let mut document = Document::default();
-    parse_unreal_cpp_header(&content, &mut document, &Default::default())
+    parse_unreal_cpp_header(&content, &mut document, &Default::default(), Path::new("Test.h"))
         .unwrap_or_else(|error| panic!("Error parsing C++ header: {}", error));
 }

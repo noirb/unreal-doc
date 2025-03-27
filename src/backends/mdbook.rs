@@ -3,10 +3,7 @@ use fs_extra::{copy_items, dir::CopyOptions};
 use regex::{Captures, Regex};
 use serde::Serialize;
 use std::{
-    collections::HashMap,
-    fs::{remove_dir_all, write},
-    path::Path,
-    process::Command,
+    collections::HashMap,  fs::{remove_dir_all, write}, path::Path, process::Command
 };
 
 #[derive(Serialize)]
@@ -155,6 +152,25 @@ pub fn bake_mdbook(document: &Document, config: &Config, root: &Path) {
         files.insert("src/reference/functions.md".to_owned(), listing);
     }
 
+    if !document.delegates.is_empty() {
+        index.push_str("  - [Delegates](reference/delegates.md)\n");
+        reference_listing.push_str("\n## Delegates\n");
+        let mut listing = "# Delegates\n\n".to_owned();
+        for item in &document.delegates {
+            let index_path = format!("reference/delegates/{}.md", item.name);
+            let file_path = format!("src/reference/delegates/{}.md", item.name);
+            let mut content = String::default();
+            bake_delegate(item, &mut content); // write out delegate content
+            files.insert(file_path, content);
+            let entry = format!("    - [{}]({})\n", item.name, index_path);
+            index.push_str(&entry);
+            let entry = format!("- [`{}`]({})\n", item.name, index_path);
+            listing.push_str(&entry);
+            reference_listing.push_str(&entry);
+        }
+        files.insert("src/reference/delegates.md".to_owned(), listing);
+    }
+
     files.insert("src/reference.md".to_owned(), reference_listing);
     files.insert("src/documentation.md".to_owned(), documentation);
 
@@ -195,11 +211,10 @@ pub fn bake_mdbook(document: &Document, config: &Config, root: &Path) {
         let path = config.output_dir.join(path);
         ensure_dir(&path);
         let content = format!(
-            "{}{}{}\n---\n_Documentation built with [**`Unreal-Doc` v{}**](https://github.com/PsichiX/unreal-doc) tool by [**`PsichiX`**](https://github.com/PsichiX)_",
+            "{}{}{}\n",
             header,
             content,
             footer,
-            env!("CARGO_PKG_VERSION"),
         );
         write(&path, content)
             .unwrap_or_else(|_| panic!("Could not write mdbook page file: {:?}", path));
@@ -284,6 +299,11 @@ fn replace_code_references(content: &str, document: &Document) -> String {
                 .iter()
                 .find(|item| item.name == name)
                 .map(|_| format!("/reference/functions/{}.md", name)),
+            "delegate" => document
+                .delegates
+                .iter()
+                .find(|item| item.name == name)
+                .map(|_| format!("/reference/delegates/{}.md", name)),
             _ => None,
         };
         if let Some(path) = path {
@@ -425,7 +445,7 @@ fn bake_specifiers(specifiers: &Specifiers, content: &mut String) {
 
 fn bake_enum(item: &Enum, content: &mut String) {
     content.push_str(&format!("# **Enum: `{}`**\n\n", item.name));
-    content.push_str(&format!("```cpp\n{}\n```\n\n", item.signature()));
+    content.push_str(&format!("```cpp\n//  {} : {}\n\n{}\n```\n\n", item.filename, item.fileline, item.signature()));
     if let Some(specifiers) = &item.specifiers {
         content.push_str("---\n\n");
         bake_specifiers(specifiers, content);
@@ -440,13 +460,13 @@ fn bake_struct_class(item: &StructClass, content: &mut String) {
         StructClassMode::Struct => content.push_str(&format!("# **Struct: `{}`**\n\n", item.name)),
         StructClassMode::Class => content.push_str(&format!("# **Class: `{}`**\n\n", item.name)),
     }
-    content.push_str(&format!("```cpp\n{}\n```\n\n", item.signature()));
+    content.push_str(&format!("```cpp\n//  {} : {}\n\n{}\n```\n\n", item.filename, item.fileline, item.signature()));
     if let Some(specifiers) = &item.specifiers {
         content.push_str("---\n\n");
         bake_specifiers(specifiers, content);
     }
     content.push_str("---\n\n");
-    content.push_str(&item.doc_comments.to_owned().unwrap_or_default());
+    bake_struct_class_comments(&item, content);
     content.push_str("\n\n");
     if !item.properties.is_empty() {
         content.push_str("---\n\n# **Properties**\n\n");
@@ -461,6 +481,19 @@ fn bake_struct_class(item: &StructClass, content: &mut String) {
             bake_function(method, content, true);
         }
         content.push_str("\n\n");
+    }
+}
+
+fn bake_struct_class_comments(item: &StructClass, content: &mut String) {
+    if let Some(comments) = item.doc_comments.to_owned() {
+        let re = Regex::new(r"(?ms).*<summary>(.*)</summary>.*").unwrap();
+        if let Some(caps) = re.captures(comments.as_str()) {
+            if caps.len() > 1 {
+                content.push_str(&caps[1]);
+            }
+        } else {
+            content.push_str(&comments);
+        }
     }
 }
 
@@ -488,6 +521,114 @@ fn bake_property(item: &Property, content: &mut String, member: bool) {
     content.push_str("\n\n");
 }
 
+fn bake_delegate(item: &Delegate, content: &mut String) {
+    content.push_str(&format!("# **Delegate: `{}`**\n\n", item.name));
+
+    // declaration
+    content.push_str(&format!("```cpp\n// Delegate type\n{}\n\n// Compatible function signtature\n{}\n\n```\n\n", item.signature(), item.callback_signature()));
+    // content.push_str("```cpp\n{}\n```\n\n", item.);
+
+    // UDELEGATE specifiers
+    if let Some(specifiers) = &item.specifiers {
+        content.push_str("---\n\n");
+        bake_specifiers(specifiers, content);
+    }
+
+    // main comments
+    bake_delegate_comments(&item.doc_comments, content);
+
+    // individual args
+    if !item.arguments.is_empty() {
+        content.push_str("---\n\n# **Parameters**\n\n");
+        for arg in &item.arguments {
+            bake_delegate_argument(arg, &item.doc_comments, content);
+        }
+    }
+
+    // return value
+    bake_delegate_return_type(&item.return_type, &item.doc_comments, content);
+
+    content.push_str("\n\n");
+}
+
+fn bake_delegate_comments(doc_comments: &Option<String>, content: &mut String) {
+    if let Some(comments) = doc_comments {
+        let re = Regex::new(r"(?ms).*<summary>(.*)</summary>.*").unwrap();
+        if let Some(caps) = re.captures(comments) {
+            if caps.len() > 1 {
+                content.push_str(format!("<summary>\n\n{}</summary>", &caps[1]).as_str());
+            }
+        } else {
+            content.push_str(&comments);
+        }
+    }
+}
+
+fn bake_delegate_argument(item: &Argument, fun_comments: &Option<String>, content: &mut String) {
+    if let Some(name) = &item.name {
+        content.push_str(&format!("* ## __`{}`__\n\n", name));
+    } else {
+        let re = Regex::new(r"(?ms)/\*(.*)\*/").unwrap();
+        if let Some(caps) = re.captures(&item.signature()) {
+            if caps.len() > 1 {
+                content.push_str(format!("* ## __`{}`__\n\n", &caps[1]).as_str());
+            }
+        }
+        else {
+            content.push_str("* _Unnamed_\n\n");
+        }
+    }
+    let indented = indent(4, &{
+        let mut content = String::default();
+        content.push_str(&format!("```cpp\n{}\n```\n\n", item.signature()));
+        content.push_str(&item.doc_comments.to_owned().unwrap_or_default());
+
+        if let Some(comments) = fun_comments {
+            if let Some(name) = &item.name {
+                let re = Regex::new(format!(r#"<param name=\"{}\">(.*)</param>"#, &name).as_str()).unwrap();
+                if let Some(caps) = re.captures(comments) {
+                    if caps.len() > 1 {
+                        content.push_str("\n\n");
+                        content.push_str(&caps[1]);
+                    }
+                }
+            }
+        }
+
+        content.push_str("\n\n");
+        content
+    });
+    content.push_str(&indented);
+    content.push_str("\n\n");
+}
+
+fn bake_delegate_return_type(return_type: &Option<String>, doc_comments: &Option<String>, content: &mut String) {
+    if let Some(r) = return_type {
+        if r != "void" {
+            content.push_str("---\n\n# **Returns**\n\n");
+            content.push_str("*\n");
+            let indented = indent(4, &{
+                let mut content = String::default();
+
+                content.push_str(&format!("```cpp\n{}\n```\n\n", r));
+
+                if let Some(comments) = doc_comments {
+                    let re = Regex::new(r"<returns>(.*)</returns>").unwrap();
+                    if let Some(caps) = re.captures(comments) {
+                        if caps.len() > 1 {
+                            content.push_str(&caps[1]);
+                        }
+                    }
+                }
+                content.push_str("\n\n");
+                content
+            });
+            content.push_str(&indented);
+            content.push_str("\n\n");
+        }
+    }
+}
+
 fn bake_function(item: &Function, content: &mut String, member: bool) {
     let level = if member {
         content.push_str(&format!("* # __`{}`__\n\n", item.name));
@@ -498,7 +639,7 @@ fn bake_function(item: &Function, content: &mut String, member: bool) {
     };
     let indented = indent(level, &{
         let mut content = String::default();
-        content.push_str(&format!("```cpp\n{}\n```\n\n", item.signature()));
+        content.push_str(&format!("```cpp\n//  {} : {}\n\n{}\n```\n\n", item.filename, item.fileline, item.signature()));
         if member {
             content.push_str("<details>\n\n");
         }
@@ -506,16 +647,20 @@ fn bake_function(item: &Function, content: &mut String, member: bool) {
             content.push_str("---\n\n");
             bake_specifiers(specifiers, &mut content);
         }
-        content.push_str("---\n\n");
-        content.push_str(&item.doc_comments.to_owned().unwrap_or_default());
+
+        bake_function_comments(&item.doc_comments, &mut content);
+
         content.push_str("\n\n");
         if !item.arguments.is_empty() {
             content.push_str("---\n\n# **Arguments**\n\n");
             for argument in &item.arguments {
-                bake_function_argument(argument, &mut content);
+                bake_function_argument(argument, &item.doc_comments, &mut content);
             }
             content.push_str("\n\n");
         }
+
+        bake_function_return_type(&item.return_type, &item.doc_comments, &mut content);
+
         if member {
             content.push_str("</details>\n\n");
         }
@@ -525,7 +670,7 @@ fn bake_function(item: &Function, content: &mut String, member: bool) {
     content.push_str("\n\n");
 }
 
-fn bake_function_argument(item: &Argument, content: &mut String) {
+fn bake_function_argument(item: &Argument, fun_comments: &Option<String>, content: &mut String) {
     if let Some(name) = &item.name {
         content.push_str(&format!("* ## __`{}`__\n\n", name));
     } else {
@@ -535,11 +680,64 @@ fn bake_function_argument(item: &Argument, content: &mut String) {
         let mut content = String::default();
         content.push_str(&format!("```cpp\n{}\n```\n\n", item.signature()));
         content.push_str(&item.doc_comments.to_owned().unwrap_or_default());
+
+        if let Some(comments) = fun_comments {
+            if let Some(name) = &item.name {
+                let re = Regex::new(format!(r#"<param name=\"{}\">(.*)</param>"#, &name).as_str()).unwrap();
+                if let Some(caps) = re.captures(comments) {
+                    if caps.len() > 1 {
+                        content.push_str("\n\n");
+                        content.push_str(&caps[1]);
+                    }
+                }
+            }
+        }
+
         content.push_str("\n\n");
         content
     });
     content.push_str(&indented);
     content.push_str("\n\n");
+}
+
+fn bake_function_return_type(return_type: &Option<String>, doc_comments: &Option<String>, content: &mut String) {
+    if let Some(r) = return_type {
+        if r != "void" {
+            content.push_str("---\n\n# **Returns**\n\n");
+            content.push_str("*\n");
+            let indented = indent(4, &{
+                let mut content = String::default();
+
+                content.push_str(&format!("```cpp\n{}\n```\n\n", r));
+
+                if let Some(comments) = doc_comments {
+                    let re = Regex::new(r"<returns>(.*)</returns>").unwrap();
+                    if let Some(caps) = re.captures(comments) {
+                        if caps.len() > 1 {
+                            content.push_str(&caps[1]);
+                        }
+                    }
+                }
+                content.push_str("\n\n");
+                content
+            });
+            content.push_str(&indented);
+            content.push_str("\n\n");
+        }
+    }
+}
+
+fn bake_function_comments(doc_comments: &Option<String>, content: &mut String) {
+    if let Some(comments) = doc_comments {
+        let re = Regex::new(r"(?ms).*<summary>(.*)</summary>.*").unwrap();
+        if let Some(caps) = re.captures(comments) {
+            if caps.len() > 1 {
+                content.push_str(format!("<summary>\n\n{}</summary>", &caps[1]).as_str());
+            }
+        } else {
+            content.push_str(&comments);
+        }
+    }
 }
 
 fn indent(level: usize, content: &str) -> String {
@@ -556,6 +754,7 @@ fn indent(level: usize, content: &str) -> String {
 
 fn write_manifest(config: &Config) {
     let mdbook = config.backend_mdbook.as_ref().cloned().unwrap_or_default();
+
     let manifest = Book {
         book: BookInner {
             authors: mdbook.authors.to_owned(),
@@ -578,6 +777,7 @@ fn write_manifest(config: &Config) {
             },
         },
     };
+
     let content = toml::to_string(&manifest).expect("Could not serialize mdbook manifest!");
     let path = config.output_dir.join("book.toml");
     ensure_dir(&path);

@@ -28,6 +28,8 @@ pub struct Document {
     #[serde(default)]
     pub functions: Vec<Function>,
     #[serde(default)]
+    pub delegates: Vec<Delegate>,
+    #[serde(default)]
     pub book: HashMap<String, String>,
     #[serde(default)]
     pub snippets: HashMap<String, String>,
@@ -50,6 +52,7 @@ impl Document {
         self.classes.sort_by(|a, b| a.name.cmp(&b.name));
         self.structs.sort_by(|a, b| a.name.cmp(&b.name));
         self.functions.sort_by(|a, b| a.name.cmp(&b.name));
+        self.delegates.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
     pub fn resolve_injects(&mut self) {
@@ -71,6 +74,9 @@ impl Document {
             item.resolve_self_names_in_docs();
         }
         for item in &mut self.functions {
+            item.resolve_self_names_in_docs(None);
+        }
+        for item in &mut self.delegates {
             item.resolve_self_names_in_docs(None);
         }
     }
@@ -121,6 +127,8 @@ pub struct Enum {
     #[serde(default)]
     pub specifiers: Option<Specifiers>,
     pub name: String,
+    pub filename: String,
+    pub fileline: usize,
     #[serde(default)]
     pub variants: Vec<String>,
     #[serde(default)]
@@ -180,6 +188,8 @@ pub struct StructClass {
     pub api: Option<String>,
     pub mode: StructClassMode,
     pub name: String,
+    pub filename: String,
+    pub fileline: usize,
     #[serde(default)]
     pub inherits: Vec<(Visibility, String)>,
     #[serde(default)]
@@ -297,7 +307,7 @@ pub struct Property {
 
 impl Property {
     pub fn can_export(&self, settings: &Settings) -> bool {
-        self.doc_comments.is_some() && self.visibility.can_export(settings)
+        (self.doc_comments.is_some() || settings.show_all) && self.visibility.can_export(settings)
     }
 
     pub fn signature(&self) -> String {
@@ -330,6 +340,8 @@ pub struct Function {
     #[serde(default)]
     pub specifiers: Option<Specifiers>,
     pub name: String,
+    pub filename: String,
+    pub fileline: usize,
     pub return_type: Option<Type>,
     #[serde(default)]
     pub visibility: Visibility,
@@ -351,7 +363,7 @@ pub struct Function {
 
 impl Function {
     pub fn can_export(&self, settings: &Settings) -> bool {
-        self.doc_comments.is_some() && self.visibility.can_export(settings)
+        (self.doc_comments.is_some() || settings.show_all) && self.visibility.can_export(settings)
     }
 
     pub fn signature(&self) -> String {
@@ -399,6 +411,119 @@ impl Function {
         }
         for item in &mut self.arguments {
             item.resolve_self_names_in_docs(owner);
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Delegate {
+    #[serde(default)]
+    pub specifiers: Option<Specifiers>,
+    pub name: String,
+    pub filename: String,
+    pub fileline: usize,
+    pub return_type: Option<Type>,
+    pub dynamic: bool,
+    pub multicast: bool,
+    #[serde(default)]
+    pub arguments: Vec<Argument>,
+    #[serde(default)]
+    pub doc_comments: Option<String>,
+}
+
+impl Delegate {
+    pub fn can_export(&self, settings: &Settings) -> bool {
+        self.doc_comments.is_some() || settings.show_all
+    }
+
+    pub fn signature(&self) -> String {
+        let mut result = String::default();
+
+        result.push_str("DECLARE_");
+        if self.dynamic {
+            result.push_str("DYNAMIC_");
+        }
+        if self.multicast {
+            result.push_str("MULTICAST_");
+        }
+        result.push_str("DELEGATE");
+
+        result.push_str(self.num_to_param_name(&self.arguments.iter().count()));
+        result.push('(');
+
+        // if there's a return value, return type is first arg
+        if let Some(return_type) = &self.return_type {
+            result.push_str(return_type);
+            result.push_str(",\n    ");
+        }
+
+        // name is first arg after return value
+        result.push_str(&self.name);
+        result.push_str(",");
+
+        for (i, argument) in self.arguments.iter().enumerate() {
+            result.push_str("\n    ");
+            result.push_str(&argument.signature());
+            if i < self.arguments.len() - 1 {
+                result.push(',');
+            } else {
+                result.push('\n');
+            }
+        }
+        result.push(')');
+
+        result.push(';');
+        result
+    }
+
+    pub fn callback_signature(&self) -> String {
+        let mut result = String::default();
+
+        if let Some(return_type) = &self.return_type {
+            result.push_str(return_type);
+            result.push(' ');
+        }
+        else {
+            result.push_str("void ");
+        }
+
+        result.push_str(&self.name);
+        result.push('(');
+        for (i, argument) in self.arguments.iter().enumerate() {
+            result.push_str("\n    ");
+            result.push_str(&argument.signature());
+            if i < self.arguments.len() - 1 {
+                result.push(',');
+            } else {
+                result.push('\n');
+            }
+        }
+        result.push(')');
+        result.push(';');
+        result
+    }
+
+    pub fn resolve_self_names_in_docs(&mut self, owner: Option<&str>) {
+        if let (Some(owner), Some(content)) = (owner, &mut self.doc_comments) {
+            *content = replace_self_names(content, owner);
+        }
+        for item in &mut self.arguments {
+            item.resolve_self_names_in_docs(owner);
+        }
+    }
+
+    fn num_to_param_name(&self, num: &usize) -> &str {
+        match num {
+            1 => "_OneParam",
+            2 => "_TwoParams",
+            3 => "_ThreeParams",
+            4 => "_FourParams",
+            5 => "_FiveParams",
+            6 => "_SixParams",
+            7 => "_SevenParams",
+            8 => "_EightParams",
+            9 => "_NineParams",
+            _ => "" // no macro for more than 9 params exists
         }
     }
 }
