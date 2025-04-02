@@ -523,7 +523,7 @@ fn bake_delegate(item: &Delegate, content: &mut String) {
     content.push_str(&format!("# **Delegate: `{}`**\n\n", item.name));
 
     // declaration
-    content.push_str(&format!("```cpp\n// Delegate type\n{}\n\n// Compatible function signtature\n{}\n\n```\n\n", item.signature(), item.callback_signature()));
+    content.push_str(&format!("```cpp\n// Delegate type\n{}\n\n// Compatible function signature\n{}\n\n```\n\n", item.signature(), item.callback_signature()));
     // content.push_str("```cpp\n{}\n```\n\n", item.);
 
     // UDELEGATE specifiers
