@@ -583,7 +583,7 @@ fn bake_delegate_argument(item: &Argument, fun_comments: &Option<String>, conten
 
         if let Some(comments) = fun_comments {
             if let Some(name) = &item.name {
-                let re = Regex::new(format!(r#"<param name=\"{}\">(.*)</param>"#, &name).as_str()).unwrap();
+                let re = Regex::new(format!("(?ms)<param name=\"{}\">(.*)</param>", &name).as_str()).unwrap();
                 if let Some(caps) = re.captures(comments) {
                     if caps.len() > 1 {
                         content.push_str("\n\n");
@@ -681,7 +681,7 @@ fn bake_function_argument(item: &Argument, fun_comments: &Option<String>, conten
 
         if let Some(comments) = fun_comments {
             if let Some(name) = &item.name {
-                let re = Regex::new(format!(r#"<param name=\"{}\">(.*)</param>"#, &name).as_str()).unwrap();
+                let re = Regex::new(format!(r#"(?ms)<param name=\"{}\">(.*)</param>"#, &name).as_str()).unwrap();
                 if let Some(caps) = re.captures(comments) {
                     if caps.len() > 1 {
                         content.push_str("\n\n");
