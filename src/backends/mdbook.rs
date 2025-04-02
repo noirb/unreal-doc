@@ -9,7 +9,7 @@ use std::{
 #[derive(Serialize)]
 struct Book {
     pub book: BookInner,
-    pub output: BookOutput,
+    pub output: BookOutput
 }
 
 #[derive(Serialize)]
@@ -67,14 +67,12 @@ pub fn bake_mdbook(document: &Document, config: &Config, root: &Path) {
     documentation.push_str("# Contents\n");
 
     if document.book.keys().any(|k| k == "index.txt") {
-        index.push_str("\n- [Book](book/index.md)\n");
-        documentation.push_str("- [Book](/book/index.md)\n");
-        include_book_index(None, &document.book, &mut files, &mut index, 1);
+        include_book_index(None, &document.book, &mut files, &mut index, 0);
     }
 
     index.push_str("\n- [C++ API Reference](reference.md)\n");
     let mut reference_listing = "# C++ API Reference\n".to_owned();
-    documentation.push_str("- [C++ API Reference](/reference.md)\n");
+    documentation.push_str("- [C++ API Reference](reference.md)\n");
 
     if !document.enums.is_empty() {
         index.push_str("  - [Enums](reference/enums.md)\n");
@@ -394,13 +392,13 @@ fn include_book_index(
                                     .map(|line| line.trim_start_matches('#').trim())
                             })
                             .unwrap_or(name);
-                        index.push_str(&format!("- [{}](book/{})\n", title, path));
-                        output_files.insert(format!("src/book/{}", path), content.to_owned());
+                        index.push_str(&format!("- [{}]({})\n", title, path));
+                        output_files.insert(format!("src/{}", path), content.to_owned());
                         listing.push_str(&format!("- [{}]({})\n", title, name));
                     }
                 } else {
                     index.push_str(&format!(
-                        "- [{}](book/{}/index.md)\n",
+                        "- [{}]({}/index.md)\n",
                         title.unwrap_or(name),
                         path
                     ));
@@ -408,7 +406,7 @@ fn include_book_index(
                 }
             }
         }
-        output_files.insert(format!("src/book/{}index.md", path), listing);
+        output_files.insert(format!("src/{}index.md", path), listing);
     }
 }
 
@@ -775,7 +773,7 @@ fn write_manifest(config: &Config) {
                     level: 0,
                 },
             },
-        },
+        }
     };
 
     let content = toml::to_string(&manifest).expect("Could not serialize mdbook manifest!");
