@@ -432,7 +432,12 @@ fn parse_struct_class_body(
                 }
                 Element::Function(element) => {
                     if element.can_export(settings) {
-                        result.methods.push(element);
+                        if element.return_type == None {
+                            result.constructors.push(element);
+                        }
+                        else {
+                            result.methods.push(element);
+                        }
                     }
                 }
                 _ => {}

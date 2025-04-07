@@ -473,6 +473,13 @@ fn bake_struct_class(item: &StructClass, content: &mut String) {
         }
         content.push_str("\n\n");
     }
+    if !item.constructors.is_empty() {
+        content.push_str("---\n\n# **Constructors**\n\n");
+        for constructor in &item.constructors {
+            bake_function(constructor, content, true);
+        }
+        content.push_str("\n\n");
+    }
     if !item.methods.is_empty() {
         content.push_str("---\n\n# **Methods**\n\n");
         for method in &item.methods {

@@ -197,6 +197,8 @@ pub struct StructClass {
     #[serde(default)]
     pub properties: Vec<Property>,
     #[serde(default)]
+    pub constructors: Vec<Function>,
+    #[serde(default)]
     pub methods: Vec<Function>,
     #[serde(default)]
     pub doc_comments: Option<String>,
@@ -209,6 +211,7 @@ impl StructClass {
         settings.show_all
             || self.doc_comments.is_some()
             || self.properties.iter().any(|e| e.can_export(settings))
+            || self.constructors.iter().any(|e| e.can_export(settings))
             || self.methods.iter().any(|e| e.can_export(settings))
     }
 
@@ -246,6 +249,8 @@ impl StructClass {
     pub fn sort_items_by_name(&mut self) {
         self.properties.sort_by(|a, b| a.name.cmp(&b.name));
         self.methods.sort_by(|a, b| a.name.cmp(&b.name));
+        // sort constructors by argument count rather than name
+        self.constructors.sort_by(|a, b| a.arguments.iter().count().cmp(&b.arguments.iter().count()));
     }
 
     pub fn resolve_injects(
@@ -274,6 +279,9 @@ impl StructClass {
             item.resolve_self_names_in_docs(&self.name);
         }
         for item in &mut self.methods {
+            item.resolve_self_names_in_docs(Some(&self.name));
+        }
+        for item in &mut self.constructors {
             item.resolve_self_names_in_docs(Some(&self.name));
         }
     }
