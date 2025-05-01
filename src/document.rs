@@ -146,7 +146,7 @@ impl Enum {
             .iter()
             .map(|v| format!("    {}", v))
             .collect::<Vec<_>>()
-            .join(",\n");
+            .join("\n");
         format!("enum class {} : uint8 {{\n{}\n}};", self.name, variants)
     }
 
