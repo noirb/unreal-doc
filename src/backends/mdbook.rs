@@ -58,21 +58,12 @@ pub fn bake_mdbook(document: &Document, config: &Config, root: &Path) {
     let mut files = HashMap::new();
     let mut index = "# Index\n\n".to_owned();
 
-    index.push_str("[Documentation](documentation.md)\n");
-    let mut documentation = if let Some(content) = document.book.get("documentation.md") {
-        format!("{}\n\n", content)
-    } else {
-        String::new()
-    };
-    documentation.push_str("# Contents\n");
-
     if document.book.keys().any(|k| k == "index.txt") {
         include_book_index(None, &document.book, &mut files, &mut index, 0);
     }
 
     index.push_str("\n- [C++ API Reference](reference.md)\n");
     let mut reference_listing = "# C++ API Reference\n".to_owned();
-    documentation.push_str("- [C++ API Reference](reference.md)\n");
 
     if !document.enums.is_empty() {
         index.push_str("  - [Enums](reference/enums.md)\n");
@@ -170,7 +161,6 @@ pub fn bake_mdbook(document: &Document, config: &Config, root: &Path) {
     }
 
     files.insert("src/reference.md".to_owned(), reference_listing);
-    files.insert("src/documentation.md".to_owned(), documentation);
 
     let header = config
         .backend_mdbook
