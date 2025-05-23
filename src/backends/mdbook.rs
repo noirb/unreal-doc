@@ -525,7 +525,7 @@ fn bake_delegate(item: &Delegate, content: &mut String) {
 
     // UDELEGATE specifiers
     if let Some(specifiers) = &item.specifiers {
-        content.push_str("---\n\n");
+        content.push_str("\n\n---\n\n");
         bake_specifiers(specifiers, content);
     }
 
@@ -534,7 +534,7 @@ fn bake_delegate(item: &Delegate, content: &mut String) {
 
     // individual args
     if !item.arguments.is_empty() {
-        content.push_str("---\n\n# **Parameters**\n\n");
+        content.push_str("\n\n---\n\n# **Parameters**\n\n");
         for arg in &item.arguments {
             bake_delegate_argument(arg, &item.doc_comments, content);
         }

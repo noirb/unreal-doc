@@ -467,7 +467,9 @@ impl Delegate {
 
         // name is first arg after return value
         result.push_str(&self.name);
-        result.push_str(",");
+        if !self.arguments.is_empty() {
+            result.push_str(",");
+        }
 
         for (i, argument) in self.arguments.iter().enumerate() {
             result.push_str("\n    ");
